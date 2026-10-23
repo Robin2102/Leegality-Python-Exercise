@@ -11,3 +11,14 @@ class NodeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
+    
+class EdgeCreate(BaseModel):
+    source: NodeName
+    destination: NodeName
+    latency: float
+    
+class EdgeOut(BaseModel):
+    id: str
+    source: str
+    destination: str
+    latency: float

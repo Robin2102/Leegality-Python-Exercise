@@ -2,7 +2,7 @@
 
 A REST API for optimizing network routes, built with [FastAPI](https://fastapi.tiangolo.com/) as part of the Leegality Python Developer Exercise.
 
-> **Status:** in progress. The API has a health check and an endpoint to create network nodes, backed by a SQLite database. Edges and route optimization endpoints are still to be implemented.
+> **Status:** in progress. The API has a health check and endpoints to create network nodes and the directed edges between them, backed by a SQLite database. Route optimization endpoints are still to be implemented.
 
 ## Tech stack
 
@@ -21,11 +21,15 @@ A REST API for optimizing network routes, built with [FastAPI](https://fastapi.t
 │   ├── __init__.py
 │   ├── main.py        # FastAPI app: startup, error handlers, health check, routers
 │   ├── database.py    # SQLAlchemy engine, session and get_db dependency
-│   ├── models.py      # ORM models (Node)
+│   ├── models.py      # ORM models (Node, Edge)
 │   ├── schemas.py     # Pydantic request/response schemas
 │   ├── errors.py      # Handlers that return errors as {"error": "..."}
 │   └── routers/
-│       └── nodes.py   # /nodes endpoints
+│       ├── nodes.py   # /nodes endpoints
+│       └── edges.py   # /edges endpoints
+├── tests/
+│   ├── conftest.py    # client fixture with a fresh in-memory database per test
+│   └── test_nodes.py  # /nodes tests
 ├── requirements.txt   # Pinned dependencies
 └── README.md
 ```
@@ -94,6 +98,7 @@ FastAPI generates interactive documentation automatically:
 | ------ | --------- | --------------------------------------------- |
 | GET    | `/health` | Health check. Returns `{"status": "ok"}`      |
 | POST   | `/nodes`  | Create a node. Returns `201` with the new node |
+| POST   | `/edges`  | Create a directed edge between two existing nodes. Returns `201` with the new edge |
 
 Check that the server is running:
 
@@ -126,6 +131,34 @@ Responses:
 | `201`  | Node created. Body: `{"id": <int>, "name": <string>}` |
 | `400`  | A node with that name already exists, or the request body is invalid (for example, a missing or empty `name`) |
 
+#### `POST /edges`
+
+Creates a directed edge from one node to another. Nodes are referred to by name, and both must already exist. There can be only one edge for each source → destination pair; an edge in the opposite direction is a separate edge.
+
+Request body:
+
+| Field         | Type   | Rules                                                  |
+| ------------- | ------ | ------------------------------------------------------ |
+| `source`      | string | Required. Name of an existing node (spaces trimmed, 1–100 characters) |
+| `destination` | string | Required. Name of an existing node, different from `source` |
+| `latency`     | number | Required. Latency of the link                          |
+
+```bash
+curl -X POST http://127.0.0.1:8000/edges \
+  -H "Content-Type: application/json" \
+  -d '{"source": "A", "destination": "B", "latency": 5}'
+```
+
+Responses:
+
+| Status | When                                          |
+| ------ | --------------------------------------------- |
+| `201`  | Edge created. Body: `{"id": <id>, "source": <name>, "destination": <name>, "latency": <number>}` |
+| `400`  | `source` and `destination` are the same node: `Source and destination must be different nodes` |
+| `400`  | One or both nodes don't exist: `Node(s) not found: Z` |
+| `400`  | An edge between those nodes in that direction already exists: `Edge from 'A' to 'B' already exists` |
+| `400`  | The request body is invalid (for example, a missing field) |
+
 ### Error format
 
 Every error response, including validation errors, has the same shape:
@@ -134,12 +167,18 @@ Every error response, including validation errors, has the same shape:
 {"error": "Node 'A' already exists."}
 ```
 
-Request validation errors return `400` (not FastAPI's default `422`), with one message per problem joined by `; `.
+Request validation errors return `400` (not FastAPI's default `422`). Each problem is reported as `<field>: <message>`, and several problems are joined by `; `, for example:
+
+```json
+{"error": "latency: Field required"}
+```
 
 ## Running tests
 
-pytest is included in the dependencies. Once tests are added, run them from the project root with:
+Run the test suite from the project root:
 
 ```bash
 pytest
 ```
+
+Each test gets its own in-memory SQLite database (see `tests/conftest.py`), so tests don't touch `network.db` and don't depend on each other. The suite currently covers `POST /nodes`: creating a node, trimming whitespace, rejecting missing or blank names, and rejecting duplicates.
