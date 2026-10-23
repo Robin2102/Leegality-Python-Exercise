@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.database import Base, engine
-from app import models
+from app.routers import nodes
 
 
 @asynccontextmanager
@@ -17,3 +17,5 @@ app = FastAPI(title="Network Route Optimization API", description="API for optim
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+app.include_router(nodes.router)
