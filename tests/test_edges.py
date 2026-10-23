@@ -33,3 +33,8 @@ def test_reverse_edge_is_not_a_duplicate(client):
     client.post("/edges", json={"source": "ServerA", "destination": "ServerB", "latency": 1})
     r = client.post("/edges", json={"source": "ServerB", "destination": "ServerA", "latency": 2})
     assert r.status_code == 201
+
+def test_delete_edge(sample_graph):
+    assert sample_graph.delete("/edges/1").status_code == 204
+    assert sample_graph.delete("/edges/1").status_code == 404
+    assert len(sample_graph.get("/edges").json()) == 4

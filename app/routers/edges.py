@@ -43,3 +43,17 @@ def create_edge(payload: EdgeCreate, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(400, duplicate_msg)
     return to_edge_out(edge)
+
+@router.get("", response_model=list[EdgeOut])
+def list_edges(db: Session = Depends(get_db)):
+    return [to_edge_out(e) for e in db.scalars(select(Edge).order_by(Edge.id)).all()]
+
+
+@router.delete("/{edge_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_edge(edge_id: int, db: Session = Depends(get_db)):
+    edge = db.get(Edge, edge_id)
+    if edge is None:
+        raise HTTPException(404, f"Edge {edge_id} not found")
+    db.delete(edge)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
