@@ -2,7 +2,7 @@
 
 A REST API for optimizing network routes, built with [FastAPI](https://fastapi.tiangolo.com/) as part of the Leegality Python Developer Exercise.
 
-> **Status:** in progress. The API has a health check and endpoints to create network nodes and the directed edges between them, backed by a SQLite database. Route optimization endpoints are still to be implemented.
+> **Status:** in progress. The API has a health check and endpoints to create network nodes and the directed edges between them, backed by a SQLite database. The shortest-path algorithm for route optimization is written and tested (`app/graph.py`), but no endpoint uses it yet.
 
 ## Tech stack
 
@@ -24,12 +24,15 @@ A REST API for optimizing network routes, built with [FastAPI](https://fastapi.t
 │   ├── models.py      # ORM models (Node, Edge)
 │   ├── schemas.py     # Pydantic request/response schemas
 │   ├── errors.py      # Handlers that return errors as {"error": "..."}
+│   ├── graph.py       # Shortest-path algorithm (Dijkstra)
 │   └── routers/
 │       ├── nodes.py   # /nodes endpoints
 │       └── edges.py   # /edges endpoints
 ├── tests/
 │   ├── conftest.py    # client fixture with a fresh in-memory database per test
-│   └── test_nodes.py  # /nodes tests
+│   ├── test_nodes.py  # /nodes tests
+│   ├── test_edges.py  # /edges tests
+│   └── test_graph.py  # shortest-path algorithm tests
 ├── requirements.txt   # Pinned dependencies
 └── README.md
 ```
@@ -141,7 +144,7 @@ Request body:
 | ------------- | ------ | ------------------------------------------------------ |
 | `source`      | string | Required. Name of an existing node (spaces trimmed, 1–100 characters) |
 | `destination` | string | Required. Name of an existing node, different from `source` |
-| `latency`     | number | Required. Latency of the link                          |
+| `latency`     | number | Required. Latency of the link; must be greater than 0 and finite |
 
 ```bash
 curl -X POST http://127.0.0.1:8000/edges \
@@ -157,7 +160,24 @@ Responses:
 | `400`  | `source` and `destination` are the same node: `Source and destination must be different nodes` |
 | `400`  | One or both nodes don't exist: `Node(s) not found: Z` |
 | `400`  | An edge between those nodes in that direction already exists: `Edge from 'A' to 'B' already exists` |
-| `400`  | The request body is invalid (for example, a missing field) |
+| `400`  | The request body is invalid (for example, a missing field, or `latency` that is 0, negative or not a number) |
+
+### Route optimization
+
+`app/graph.py` provides `shortest_path(edges, source, destination)`, which finds the lowest-latency route between two nodes. It is not exposed through the API yet.
+
+- **Input:** an iterable of `(source, destination, latency)` tuples, plus the start and end node names. Edges are directed.
+- **Output:** `(total_latency, path)`, where `path` is the list of node names from `source` to `destination`, or `None` if `destination` can't be reached. If `source` and `destination` are the same, the result is `(0, [source])`.
+- **Algorithm:** Dijkstra's algorithm with a binary heap, O((V + E) log V). This relies on every latency being positive, which `POST /edges` enforces.
+- **Rounding:** the total is rounded to 6 decimal places to remove floating-point noise (for example, `12.5 + 10.9` gives `23.4`, not `23.400000000000002`).
+
+```python
+from app.graph import shortest_path
+
+edges = [("A", "B", 1), ("B", "C", 2), ("A", "C", 5), ("C", "D", 1)]
+shortest_path(edges, "A", "D")  # (4.0, ["A", "B", "C", "D"])
+shortest_path(edges, "D", "A")  # None
+```
 
 ### Error format
 
@@ -181,4 +201,8 @@ Run the test suite from the project root:
 pytest
 ```
 
-Each test gets its own in-memory SQLite database (see `tests/conftest.py`), so tests don't touch `network.db` and don't depend on each other. The suite currently covers `POST /nodes`: creating a node, trimming whitespace, rejecting missing or blank names, and rejecting duplicates.
+Each test gets its own in-memory SQLite database (see `tests/conftest.py`), so tests don't touch `network.db` and don't depend on each other. The suite currently covers:
+
+- **`POST /nodes`:** creating a node, trimming whitespace, rejecting missing or blank names, and rejecting duplicates.
+- **`POST /edges`:** creating an edge; rejecting missing fields, invalid latency, duplicates, unknown nodes and self-loops; and allowing an edge in the reverse direction.
+- **`shortest_path`:** choosing a cheaper multi-hop route over a direct one, unreachable destinations, same source and destination, and rounding of float totals.
