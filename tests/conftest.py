@@ -31,7 +31,21 @@ def client():
     app.dependency_overrides.clear()
 
 @pytest.fixture
-def two_nodes(client):
+def sample_graph(client):
+    """
+        A --12.5--> B --10.9--> D
+        A --5-----> C --30----> D
+        B --10.1--> C
+        E (isolated)
+    """
     for name in ["ServerA", "ServerB", "ServerC", "ServerD", "ServerE"]:
         client.post("/nodes", json={"name": name})
+    for src, dst, latency in [
+        ("ServerA", "ServerB", 12.5),
+        ("ServerB", "ServerD", 10.9),
+        ("ServerA", "ServerC", 5),
+        ("ServerC", "ServerD", 30),
+        ("ServerB", "ServerC", 10.1),
+    ]:
+        client.post("/edges", json={"source": src, "destination": dst, "latency": latency})
     return client

@@ -2,7 +2,7 @@
 
 A REST API for optimizing network routes, built with [FastAPI](https://fastapi.tiangolo.com/) as part of the Leegality Python Developer Exercise.
 
-> **Status:** in progress. The API has a health check and endpoints to create network nodes and the directed edges between them, backed by a SQLite database. The shortest-path algorithm for route optimization is written and tested (`app/graph.py`), but no endpoint uses it yet.
+> **Status:** in progress. The API can create network nodes and the directed edges between them, and find the lowest-latency route between two nodes. Data is stored in a SQLite database, and every successful route lookup is saved to a history table. There is no endpoint to read that history yet.
 
 ## Tech stack
 
@@ -21,17 +21,19 @@ A REST API for optimizing network routes, built with [FastAPI](https://fastapi.t
 │   ├── __init__.py
 │   ├── main.py        # FastAPI app: startup, error handlers, health check, routers
 │   ├── database.py    # SQLAlchemy engine, session and get_db dependency
-│   ├── models.py      # ORM models (Node, Edge)
+│   ├── models.py      # ORM models (Node, Edge, RouteQuery)
 │   ├── schemas.py     # Pydantic request/response schemas
 │   ├── errors.py      # Handlers that return errors as {"error": "..."}
 │   ├── graph.py       # Shortest-path algorithm (Dijkstra)
 │   └── routers/
 │       ├── nodes.py   # /nodes endpoints
-│       └── edges.py   # /edges endpoints
+│       ├── edges.py   # /edges endpoints
+│       └── routes.py  # /routes endpoints
 ├── tests/
-│   ├── conftest.py    # client fixture with a fresh in-memory database per test
+│   ├── conftest.py    # client and sample_graph fixtures (fresh in-memory database per test)
 │   ├── test_nodes.py  # /nodes tests
 │   ├── test_edges.py  # /edges tests
+│   ├── test_routes.py # /routes tests
 │   └── test_graph.py  # shortest-path algorithm tests
 ├── requirements.txt   # Pinned dependencies
 └── README.md
@@ -102,6 +104,7 @@ FastAPI generates interactive documentation automatically:
 | GET    | `/health` | Health check. Returns `{"status": "ok"}`      |
 | POST   | `/nodes`  | Create a node. Returns `201` with the new node |
 | POST   | `/edges`  | Create a directed edge between two existing nodes. Returns `201` with the new edge |
+| POST   | `/routes/shortest` | Find the lowest-latency route between two nodes |
 
 Check that the server is running:
 
@@ -162,9 +165,42 @@ Responses:
 | `400`  | An edge between those nodes in that direction already exists: `Edge from 'A' to 'B' already exists` |
 | `400`  | The request body is invalid (for example, a missing field, or `latency` that is 0, negative or not a number) |
 
-### Route optimization
+#### `POST /routes/shortest`
 
-`app/graph.py` provides `shortest_path(edges, source, destination)`, which finds the lowest-latency route between two nodes. It is not exposed through the API yet.
+Finds the route from `source` to `destination` with the lowest total latency, following edges in their direction.
+
+Request body:
+
+| Field         | Type   | Rules                                                  |
+| ------------- | ------ | ------------------------------------------------------ |
+| `source`      | string | Required. Name of an existing node (spaces trimmed, 1–100 characters) |
+| `destination` | string | Required. Name of an existing node                     |
+
+With edges A→B (12.5), B→D (10.9), A→C (5), C→D (30) and B→C (10.1):
+
+```bash
+curl -X POST http://127.0.0.1:8000/routes/shortest \
+  -H "Content-Type: application/json" \
+  -d '{"source": "A", "destination": "D"}'
+# {"total_latency":23.4,"path":["A","B","D"]}
+```
+
+Responses:
+
+| Status | When                                          |
+| ------ | --------------------------------------------- |
+| `200`  | Route found. Body: `{"total_latency": <number>, "path": [<name>, ...]}`. If `source` and `destination` are the same node, the result is `{"total_latency": 0, "path": [<name>]}` |
+| `400`  | One or both nodes don't exist: `Node(s) not found: Ghost` |
+| `400`  | The request body is invalid (for example, a missing field) |
+| `404`  | Both nodes exist but no route connects them: `No path exists between A and E` |
+
+#### Route history
+
+Every successful lookup (`200`) is saved to the `route_queries` table with the source, destination, total latency, path and a UTC timestamp. Failed lookups are not saved. Node names and the path are stored as plain values rather than links to the `nodes` table, so the history still shows what was answered at the time even if the graph changes later. No endpoint returns the history yet.
+
+### How the shortest route is found
+
+The endpoint loads every edge and passes it to `shortest_path(edges, source, destination)` in `app/graph.py`, which can also be used on its own.
 
 - **Input:** an iterable of `(source, destination, latency)` tuples, plus the start and end node names. Edges are directed.
 - **Output:** `(total_latency, path)`, where `path` is the list of node names from `source` to `destination`, or `None` if `destination` can't be reached. If `source` and `destination` are the same, the result is `(0, [source])`.
@@ -205,4 +241,5 @@ Each test gets its own in-memory SQLite database (see `tests/conftest.py`), so t
 
 - **`POST /nodes`:** creating a node, trimming whitespace, rejecting missing or blank names, and rejecting duplicates.
 - **`POST /edges`:** creating an edge; rejecting missing fields, invalid latency, duplicates, unknown nodes and self-loops; and allowing an edge in the reverse direction.
+- **`POST /routes/shortest`:** finding the cheapest route in the `sample_graph` fixture, `404` when no route exists, unknown nodes, and missing fields.
 - **`shortest_path`:** choosing a cheaper multi-hop route over a direct one, unreachable destinations, same source and destination, and rounding of float totals.

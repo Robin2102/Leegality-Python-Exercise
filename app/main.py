@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.database import Base, engine
 from app.errors import register_error_handlers
-from app.routers import edges, nodes
+from app.routers import edges, nodes, routes
 
 
 @asynccontextmanager
@@ -22,3 +22,4 @@ def health_check():
 
 app.include_router(nodes.router)
 app.include_router(edges.router)
+app.include_router(routes.router)

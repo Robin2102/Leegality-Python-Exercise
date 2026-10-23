@@ -22,3 +22,12 @@ class EdgeOut(BaseModel):
     source: str
     destination: str
     latency: float
+    
+class RouteRequest(BaseModel):
+    source: NodeName
+    destination: NodeName
+
+
+class RouteOut(BaseModel):
+    total_latency: float
+    path: list[str]

@@ -1,7 +1,12 @@
-from sqlalchemy import ForeignKey, String, UniqueConstraint, CheckConstraint, Float
+from datetime import datetime, timezone
+
+from sqlalchemy import JSON, CheckConstraint, DateTime, Float, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+def utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 class Node(Base):
     __tablename__ = "nodes"
@@ -26,3 +31,20 @@ class Edge(Base):
     
     source: Mapped["Node"] = relationship(foreign_keys=[source_id], lazy="joined")
     destination: Mapped["Node"] = relationship(foreign_keys=[destination_id], lazy="joined")
+    
+class RouteQuery(Base):
+    """A record of every successful shortest-route lookup.
+
+    Names and the path are stored as plain values (not foreign keys) on purpose:
+    history is a log of what was answered at that time, so it must survive the
+    nodes being deleted or the graph changing afterwards.
+    """
+
+    __tablename__ = "route_queries"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(100), index=True)
+    destination: Mapped[str] = mapped_column(String(100), index=True)
+    total_latency: Mapped[float] = mapped_column(Float)
+    path: Mapped[list[str]] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
