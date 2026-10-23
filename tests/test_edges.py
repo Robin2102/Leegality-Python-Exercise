@@ -33,4 +33,3 @@ def test_reverse_edge_is_not_a_duplicate(client):
     client.post("/edges", json={"source": "ServerA", "destination": "ServerB", "latency": 1})
     r = client.post("/edges", json={"source": "ServerB", "destination": "ServerA", "latency": 2})
     assert r.status_code == 201
-
