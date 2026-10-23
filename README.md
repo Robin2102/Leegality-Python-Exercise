@@ -2,7 +2,7 @@
 
 A REST API for optimizing network routes, built with [FastAPI](https://fastapi.tiangolo.com/) as part of the Leegality Python Developer Exercise.
 
-> **Status:** in progress. The API can create network nodes and the directed edges between them, and find the lowest-latency route between two nodes. Data is stored in a SQLite database, and every successful route lookup is saved to a history table. There is no endpoint to read that history yet.
+> **Status:** complete. All four required endpoints from the exercise spec are implemented (add node, add edge, shortest route, route history), along with the four optional ones (list and delete nodes and edges). Data is stored in a SQLite database.
 
 ## Tech stack
 
@@ -33,7 +33,9 @@ A REST API for optimizing network routes, built with [FastAPI](https://fastapi.t
 │   ├── conftest.py    # client and sample_graph fixtures (fresh in-memory database per test)
 │   ├── test_nodes.py  # /nodes tests
 │   ├── test_edges.py  # /edges tests
-│   ├── test_routes.py # /routes tests
+│   ├── test_routes.py # /routes/shortest tests
+│   ├── test_history.py # /routes/history tests
+│   ├── test_errors.py # invalid JSON and unexpected-error responses
 │   └── test_graph.py  # shortest-path algorithm tests
 ├── requirements.txt   # Pinned dependencies
 └── README.md
@@ -103,8 +105,13 @@ FastAPI generates interactive documentation automatically:
 | ------ | --------- | --------------------------------------------- |
 | GET    | `/health` | Health check. Returns `{"status": "ok"}`      |
 | POST   | `/nodes`  | Create a node. Returns `201` with the new node |
+| GET    | `/nodes`  | List all nodes |
+| DELETE | `/nodes/{id}` | Delete a node and every edge connected to it |
 | POST   | `/edges`  | Create a directed edge between two existing nodes. Returns `201` with the new edge |
+| GET    | `/edges`  | List all edges |
+| DELETE | `/edges/{id}` | Delete an edge |
 | POST   | `/routes/shortest` | Find the lowest-latency route between two nodes |
+| GET    | `/routes/history` | List past successful route lookups, with optional filters |
 
 Check that the server is running:
 
@@ -137,6 +144,24 @@ Responses:
 | `201`  | Node created. Body: `{"id": <int>, "name": <string>}` |
 | `400`  | A node with that name already exists, or the request body is invalid (for example, a missing or empty `name`) |
 
+#### `GET /nodes`
+
+Returns every node, ordered by `id`:
+
+```json
+[{"id": 1, "name": "ServerA"}, {"id": 2, "name": "ServerB"}]
+```
+
+#### `DELETE /nodes/{id}`
+
+Deletes the node and every edge that starts or ends at it. Route history is kept (see [Route history](#get-routeshistory)).
+
+| Status | When                                          |
+| ------ | --------------------------------------------- |
+| `204`  | Node deleted. No body |
+| `404`  | No node with that id: `Node 99 not found` |
+| `400`  | `id` is not an integer |
+
 #### `POST /edges`
 
 Creates a directed edge from one node to another. Nodes are referred to by name, and both must already exist. There can be only one edge for each source → destination pair; an edge in the opposite direction is a separate edge.
@@ -164,6 +189,22 @@ Responses:
 | `400`  | One or both nodes don't exist: `Node(s) not found: Z` |
 | `400`  | An edge between those nodes in that direction already exists: `Edge from 'A' to 'B' already exists` |
 | `400`  | The request body is invalid (for example, a missing field, or `latency` that is 0, negative or not a number) |
+
+#### `GET /edges`
+
+Returns every edge, ordered by `id`, with node names rather than ids:
+
+```json
+[{"id": 1, "source": "ServerA", "destination": "ServerB", "latency": 12.5}]
+```
+
+#### `DELETE /edges/{id}`
+
+| Status | When                                          |
+| ------ | --------------------------------------------- |
+| `204`  | Edge deleted. No body |
+| `404`  | No edge with that id: `Edge 99 not found` |
+| `400`  | `id` is not an integer |
 
 #### `POST /routes/shortest`
 
@@ -194,9 +235,47 @@ Responses:
 | `400`  | The request body is invalid (for example, a missing field) |
 | `404`  | Both nodes exist but no route connects them: `No path exists between A and E` |
 
-#### Route history
+#### `GET /routes/history`
 
-Every successful lookup (`200`) is saved to the `route_queries` table with the source, destination, total latency, path and a UTC timestamp. Failed lookups are not saved. Node names and the path are stored as plain values rather than links to the `nodes` table, so the history still shows what was answered at the time even if the graph changes later. No endpoint returns the history yet.
+Every successful lookup (`200`) from `POST /routes/shortest` is saved to the `route_queries` table, and this endpoint lists them. Failed lookups (`400`, `404`) are not saved. Node names and the path are stored as plain values rather than links to the `nodes` table, so the history still shows what was answered at the time even after nodes or edges are deleted.
+
+Query parameters (all optional, and they can be combined):
+
+| Parameter     | Description |
+| ------------- | ----------- |
+| `source`      | Only lookups from this node name (exact match) |
+| `destination` | Only lookups to this node name (exact match) |
+| `limit`       | Maximum number of records, 1–1000 |
+| `date_from`   | Only lookups at or after this time (ISO 8601, e.g. `2026-02-20T14:00:00Z`) |
+| `date_to`     | Only lookups at or before this time |
+
+Times without a timezone are treated as UTC. A date on its own, such as `2026-02-20`, covers the whole day: as `date_from` it means the start of that day, and as `date_to` the end of it. So `date_from=2026-02-20&date_to=2026-02-20` returns every lookup made on 20 February.
+
+Results are ordered oldest first. `limit` therefore returns the oldest matching records.
+
+```bash
+curl "http://127.0.0.1:8000/routes/history?source=ServerA&limit=10"
+```
+
+```json
+[
+  {
+    "id": 1,
+    "source": "ServerA",
+    "destination": "ServerD",
+    "total_latency": 23.4,
+    "path": ["ServerA", "ServerB", "ServerD"],
+    "created_at": "2026-02-20T14:32:00Z"
+  }
+]
+```
+
+`created_at` is always in UTC, with a `Z` suffix and whole seconds.
+
+| Status | When                                          |
+| ------ | --------------------------------------------- |
+| `200`  | A list of records; empty if nothing matches |
+| `400`  | `limit` is outside 1–1000, a date can't be parsed, or `date_from` is later than `date_to` |
 
 ### How the shortest route is found
 
@@ -223,11 +302,13 @@ Every error response, including validation errors, has the same shape:
 {"error": "Node 'A' already exists."}
 ```
 
-Request validation errors return `400` (not FastAPI's default `422`). Each problem is reported as `<field>: <message>`, and several problems are joined by `; `, for example:
+Request validation errors, in the body, query string or path, return `400` (not FastAPI's default `422`). Each problem is reported as `<field>: <message>`, and several problems are joined by `; `, for example:
 
 ```json
 {"error": "latency: Field required"}
 ```
+
+A body that isn't valid JSON returns `400` with `{"error": "Request body is not valid JSON"}`. An unexpected server error returns `500` with `{"error": "Internal server error"}`, and the full traceback goes to the server log.
 
 ## Running tests
 
@@ -239,7 +320,9 @@ pytest
 
 Each test gets its own in-memory SQLite database (see `tests/conftest.py`), so tests don't touch `network.db` and don't depend on each other. The suite currently covers:
 
-- **`POST /nodes`:** creating a node, trimming whitespace, rejecting missing or blank names, and rejecting duplicates.
-- **`POST /edges`:** creating an edge; rejecting missing fields, invalid latency, duplicates, unknown nodes and self-loops; and allowing an edge in the reverse direction.
+- **Nodes:** creating a node, trimming whitespace, rejecting missing or blank names, rejecting duplicates, listing nodes, and deleting a node along with its edges.
+- **Edges:** creating an edge; rejecting missing fields, invalid latency, duplicates, unknown nodes and self-loops; allowing an edge in the reverse direction; and deleting an edge (`204`, then `404`).
 - **`POST /routes/shortest`:** finding the cheapest route in the `sample_graph` fixture, `404` when no route exists, unknown nodes, and missing fields.
+- **`GET /routes/history`:** only successful lookups are recorded, the response format, each filter, a date-only `date_to` including the whole day, invalid parameters, and history surviving node deletion.
+- **Errors:** invalid JSON bodies and unexpected server errors both return the `{"error": ...}` format.
 - **`shortest_path`:** choosing a cheaper multi-hop route over a direct one, unreachable destinations, same source and destination, and rounding of float totals.

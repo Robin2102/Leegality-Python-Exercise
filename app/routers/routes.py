@@ -1,6 +1,8 @@
 from datetime import datetime, timezone
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BeforeValidator
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -44,13 +46,20 @@ def _to_utc(value: datetime) -> datetime:
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
+def _end_of_day_if_date_only(value):
+    # "2026-02-20" as date_to should include the whole day, not stop at midnight.
+    if isinstance(value, str) and len(value) == 10:
+        return f"{value}T23:59:59.999999"
+    return value
+
+
 @router.get("/history", response_model=list[RouteHistoryOut])
 def get_route_history(
     source: str | None = None,
     destination: str | None = None,
     limit: int | None = Query(None, ge=1, le=1000),
     date_from: datetime | None = None,
-    date_to: datetime | None = None,
+    date_to: Annotated[datetime | None, BeforeValidator(_end_of_day_if_date_only)] = None,
     db: Session = Depends(get_db),
 ):
     if date_from and date_to and _to_utc(date_from) > _to_utc(date_to):

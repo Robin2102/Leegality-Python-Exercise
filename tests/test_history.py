@@ -44,3 +44,9 @@ def test_history_survives_node_deletion(sample_graph):
     sample_graph.post("/routes/shortest", json={"source": "ServerA", "destination": "ServerD"})
     sample_graph.delete("/nodes/2")
     assert sample_graph.get("/routes/history").json()[0]["path"] == ["ServerA", "ServerB", "ServerD"]
+
+
+def test_history_date_only_date_to_includes_whole_day(sample_graph):
+    sample_graph.post("/routes/shortest", json={"source": "ServerA", "destination": "ServerD"})
+    today = datetime.now(timezone.utc).date().isoformat()
+    assert len(sample_graph.get("/routes/history", params={"date_from": today, "date_to": today}).json()) == 1
