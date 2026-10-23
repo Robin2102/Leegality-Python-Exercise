@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 NodeName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
@@ -15,7 +15,7 @@ class NodeOut(BaseModel):
 class EdgeCreate(BaseModel):
     source: NodeName
     destination: NodeName
-    latency: float
+    latency: float = Field(gt=0, allow_inf_nan=False)
     
 class EdgeOut(BaseModel):
     id: str
