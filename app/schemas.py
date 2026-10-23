@@ -1,6 +1,7 @@
+from datetime import datetime, timezone
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_serializer
 
 NodeName = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
 
@@ -27,7 +28,22 @@ class RouteRequest(BaseModel):
     source: NodeName
     destination: NodeName
 
-
 class RouteOut(BaseModel):
     total_latency: float
     path: list[str]
+    
+class RouteHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    source: str
+    destination: str
+    total_latency: float
+    path: list[str]
+    created_at: datetime
+
+    @field_serializer("created_at")
+    def _as_utc_z(self, value: datetime) -> str:
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")

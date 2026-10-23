@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -6,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.graph import shortest_path
 from app.models import Edge, Node, RouteQuery
-from app.schemas import RouteOut, RouteRequest
+from app.schemas import RouteHistoryOut, RouteOut, RouteRequest
 
 router = APIRouter(prefix="/routes", tags=["routes"])
 
@@ -36,3 +38,34 @@ def get_shortest_route(payload: RouteRequest, db: Session = Depends(get_db)):
     ))
     db.commit()
     return RouteOut(total_latency=total_latency, path=path)
+
+def _to_utc(value: datetime) -> datetime:
+    # Accept "2026-02-20T14:00:00Z", "+05:30" offsets, or naive.
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+@router.get("/history", response_model=list[RouteHistoryOut])
+def get_route_history(
+    source: str | None = None,
+    destination: str | None = None,
+    limit: int | None = Query(None, ge=1, le=1000),
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    db: Session = Depends(get_db),
+):
+    if date_from and date_to and _to_utc(date_from) > _to_utc(date_to):
+        raise HTTPException(400, "date_from must be earlier than or equal to date_to")
+
+    query = select(RouteQuery)
+    if source:
+        query = query.where(RouteQuery.source == source)
+    if destination:
+        query = query.where(RouteQuery.destination == destination)
+    if date_from:
+        query = query.where(RouteQuery.created_at >= _to_utc(date_from))
+    if date_to:
+        query = query.where(RouteQuery.created_at <= _to_utc(date_to))
+    query = query.order_by(RouteQuery.created_at, RouteQuery.id)
+    if limit:
+        query = query.limit(limit)
+    return db.scalars(query).all()
