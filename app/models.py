@@ -12,7 +12,7 @@ class Node(Base):
 class Edge(Base):
     __tablename__ = "edges"
     
-    __table___args__ = (
+    __table_args__ = (
         UniqueConstraint("source_id", "destination_id", name="unique_edge_source_destination"),
         CheckConstraint("latency > 0", name="check_edge_latency_positive"),
         CheckConstraint("source_id <> destination_id", name="check_edge_no_self_loop"),

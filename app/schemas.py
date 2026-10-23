@@ -18,7 +18,7 @@ class EdgeCreate(BaseModel):
     latency: float = Field(gt=0, allow_inf_nan=False)
     
 class EdgeOut(BaseModel):
-    id: str
+    id: int
     source: str
     destination: str
     latency: float

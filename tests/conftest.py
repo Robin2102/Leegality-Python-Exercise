@@ -29,3 +29,9 @@ def client():
     app.dependency_overrides[get_db] = override_get_db
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+@pytest.fixture
+def two_nodes(client):
+    for name in ["ServerA", "ServerB", "ServerC", "ServerD", "ServerE"]:
+        client.post("/nodes", json={"name": name})
+    return client
